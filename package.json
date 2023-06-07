@@ -1,6 +1,6 @@
 {
   "name": "use-persistent-state",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A JavaScript library that simplifies persistent storage management in web applications, providing utilities for storing and retrieving data using local storage and session storage mechanisms.",
   "repository": {
     "type": "git",
@@ -55,7 +55,8 @@
     "state management",
     "data caching",
     "user preferences",
-    "application state"
+    "application state",
+    "ssr"
   ],
   "sideEffects": false
 }

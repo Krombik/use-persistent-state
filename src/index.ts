@@ -1,12 +1,29 @@
-import { useState, useLayoutEffect, SetStateAction } from "react";
+import {
+  useState,
+  useLayoutEffect,
+  SetStateAction,
+  useContext,
+  useEffect,
+} from "react";
 import type { Converter, PersistentStateTuple, SafeStorage } from "./types";
 import isUndefined from "lodash.isundefined";
+import {
+  PersistStorageHydrationContext,
+  HydrationContext,
+} from "./PersistStorageHydrationProvider";
+import noop from "lodash.noop";
 
 export interface PersistentStorageFields {}
 
 type Fields = {} extends PersistentStorageFields
   ? Record<string, any>
   : PersistentStorageFields;
+
+type StringifiedFields = {
+  [key in keyof Fields]: undefined extends Extract<Fields[key], undefined>
+    ? string | undefined
+    : string;
+};
 
 declare class PersistentStorage {
   /**
@@ -25,9 +42,7 @@ declare class PersistentStorage {
    */
   static getStringified<T extends keyof Fields & string>(
     key: T
-  ): undefined extends Extract<Fields[T], undefined>
-    ? string | undefined
-    : string;
+  ): StringifiedFields[T];
 
   /**
    * Sets the value associated with the given key in the persistent storage.
@@ -48,10 +63,76 @@ declare class PersistentStorage {
    */
   static setStringified<T extends keyof Fields & string>(
     key: T,
-    stringifiedValue: undefined extends Extract<Fields[T], undefined>
-      ? string | undefined
-      : string
+    stringifiedValue: StringifiedFields[T]
   ): PersistentStorage;
+
+  /**
+   * Overrides the current values in the persistent storage with the provided values and stringifiedValues.
+   * It updates both regular values and their corresponding stringified representations in the storage.
+   *
+   * Retrieves the server-side rendered data for the configured fields in the `PersistentStorage`.
+   * This data should be passed to the `PersistStorageHydrationProvider` to hydrate the client-side state.
+   *
+   * @param values - An object containing new values for override.
+   * @param stringifiedValues - An object containing new stringified values for override.
+   * @returns The persistence storage hydration context.
+   *
+   * @example
+   * ```jsx
+   * import usePersistentState, {
+   *   PersistentStorage,
+   *   safeLocalStorage,
+   *   PersistStorageHydrationProvider,
+   * } from "use-persistent-state";
+   *
+   * PersistentStorage({
+   *   myCounter: {
+   *     defaultValue: 0,
+   *     storage: safeLocalStorage,
+   *   },
+   * });
+   *
+   * const MyComponent = () => {
+   *   const [counter, setCounter] = usePersistentState("myCounter");
+   *
+   *   return (
+   *     <div>
+   *       <div>{counter}</div>
+   *       <button
+   *         onClick={() => {
+   *           setCounter((prevValue) => prevValue + 1);
+   *         }}
+   *       >
+   *         Increment
+   *       </button>
+   *     </div>
+   *   );
+   * };
+   *
+   * const Page = ({ serverData }) => (
+   *   <PersistStorageHydrationProvider value={serverData}>
+   *     <MyComponent />
+   *   </PersistStorageHydrationProvider>
+   * );
+   *
+   * export const getServerSideProps = async () => {
+   *   return {
+   *     props: {
+   *       serverData: PersistentStorage.ssr(),
+   *     },
+   *   };
+   * };
+   * ```
+   */
+  static ssr<
+    T1 extends keyof Omit<Fields, T2>,
+    T2 extends keyof Omit<StringifiedFields, T1>
+  >(
+    values?: [T1] extends [never]
+      ? Partial<Fields>
+      : { [key in T1]?: Fields[key] },
+    stringifiedValues?: { [key in T2]?: StringifiedFields[key] }
+  ): PersistStorageHydrationContext;
 }
 
 /**
@@ -99,26 +180,25 @@ type UsePersistentState = {
   >;
 };
 
+type StoreItem = [
+  persistStateTuple: PersistentStateTuple<any>,
+  register: () => void,
+  setStringifiedValue: (value: string | undefined) => void
+];
+
 const [_PersistentStorage, usePersistentState] = ((): [
   PersistentStorage,
   UsePersistentState
 ] => {
-  const store = new Map<
-    string,
-    [
-      persistStateTuple: PersistentStateTuple<any>,
-      forceRerenderSet: Set<(value: {}) => void>,
-      setStringifiedValue: (value: string | undefined) => void
-    ]
-  >();
+  const store = new Map<string, StoreItem>();
+
+  const hydrationCtx: PersistStorageHydrationContext = {};
 
   const PersistentStorage = ((config) => {
-    const keys = Object.keys(config);
+    const IS_CLIENT = typeof window != "undefined";
 
-    for (let i = keys.length; i--; ) {
+    for (const key in config) {
       const forceRerenderSet = new Set<(value: {}) => void>();
-
-      const key = keys[i];
 
       const { converter = JSON, storage, defaultValue } = config[key];
 
@@ -185,9 +265,53 @@ const [_PersistentStorage, usePersistentState] = ((): [
         initialStringifiedValue,
       ];
 
-      store.set(key, [
+      const storeItem: StoreItem = [
         persistStateTuple,
-        forceRerenderSet,
+        IS_CLIENT
+          ? () => {
+              const hydrationCtx = useContext(HydrationContext);
+
+              const forceRerender = useState<{}>()[1];
+
+              useLayoutEffect(() => {
+                forceRerenderSet.add(forceRerender);
+
+                return () => {
+                  forceRerenderSet.delete(forceRerender);
+                };
+              }, [key]);
+
+              if (hydrationCtx) {
+                if (key in hydrationCtx) {
+                  const clientValue = persistStateTuple[0];
+
+                  const clientStringifiedValue = persistStateTuple[2];
+
+                  const serverStringifiedValue = hydrationCtx[key];
+
+                  if (clientStringifiedValue != serverStringifiedValue) {
+                    persistStateTuple[0] = isUndefined(serverStringifiedValue)
+                      ? serverStringifiedValue
+                      : converter.parse(serverStringifiedValue);
+
+                    persistStateTuple[2] = serverStringifiedValue;
+                  }
+
+                  delete hydrationCtx[key];
+
+                  useEffect(() => {
+                    setValue(clientValue, clientStringifiedValue);
+                  }, []);
+                } else {
+                  useEffect(noop, []);
+                }
+              }
+            }
+          : () => {
+              storeItem[1] = noop;
+
+              hydrationCtx[key] = persistStateTuple[2];
+            },
         (stringifiedValue) => {
           setValue(
             isUndefined(stringifiedValue)
@@ -196,9 +320,27 @@ const [_PersistentStorage, usePersistentState] = ((): [
             stringifiedValue
           );
         },
-      ]);
+      ];
+
+      store.set(key, storeItem);
     }
   }) as PersistentStorage;
+
+  PersistentStorage.ssr = (values, stringifiedValues) => {
+    if (values) {
+      for (const key in values) {
+        PersistentStorage.set(key, values[key]);
+      }
+    }
+
+    if (stringifiedValues) {
+      for (const key in stringifiedValues) {
+        PersistentStorage.set(key, stringifiedValues[key]);
+      }
+    }
+
+    return hydrationCtx;
+  };
 
   PersistentStorage.get = (key) => store.get(key)![0][0];
 
@@ -219,19 +361,11 @@ const [_PersistentStorage, usePersistentState] = ((): [
   return [
     PersistentStorage,
     (key) => {
-      const forceRerender = useState<{}>()[1];
+      const tuple = store.get(key)!;
 
-      const [tuple, set] = store.get(key)!;
+      tuple[1]();
 
-      useLayoutEffect(() => {
-        set.add(forceRerender);
-
-        return () => {
-          set.delete(forceRerender);
-        };
-      }, [key]);
-
-      return tuple;
+      return tuple[0];
     },
   ];
 })();
@@ -239,6 +373,10 @@ const [_PersistentStorage, usePersistentState] = ((): [
 export { default as fakeStorage } from "./fakeStorage";
 export { default as safeLocalStorage } from "./safeLocalStorage";
 export { default as safeSessionStorage } from "./safeSessionStorage";
+export {
+  default as PersistStorageHydrationProvider,
+  type PersistStorageHydrationContext,
+} from "./PersistStorageHydrationProvider";
 
 export { _PersistentStorage as PersistentStorage };
 

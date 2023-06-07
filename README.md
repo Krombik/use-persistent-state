@@ -1,6 +1,6 @@
 # use-persistent-state
 
-JavaScript library that provides a simple and flexible way to manage persistent storage in web applications. It offers utilities for storing and retrieving data using various storage mechanisms such as local storage or cookies. With built-in support for serialization and deserialization, it ensures seamless storage of complex data structures. Whether you need to persist user preferences, application state, or cached data, this library simplifies the process and ensures data integrity across sessions and devices.
+JavaScript library that provides a simple and flexible way to manage persistent storage in web applications. It offers utilities for storing and retrieving data using various storage mechanisms such as local storage or cookies. With built-in support for serialization and deserialization, it ensures seamless storage of complex data structures. Whether you need to persist user preferences, application state, or cached data, this library simplifies the process and ensures data integrity across sessions and devices. Additionally, it provides server-side rendering (SSR) support, allowing you to retrieve and hydrate the stored data during server-side rendering for seamless client-side state initialization.
 
 ## Installation
 
@@ -24,6 +24,7 @@ yarn add use-persistent-state
 import PersistentStorage, {
   usePersistentState,
   safeLocalStorage,
+  PersistStorageHydrationProvider,
 } from "use-persistent-state";
 
 // Type augmentation for the 'use-persistent-state' library
@@ -70,20 +71,37 @@ const MyComponent = () => {
     </div>
   );
 };
+
+// code bellow is for server-side rendering, ignore it if you don't use it
+const IndexPage: NextPage = ({ serverData }) => (
+  <PersistStorageHydrationProvider value={serverData}>
+    <MyComponent />
+  </PersistStorageHydrationProvider>
+);
+
+export const getServerSideProps = async () => {
+  return {
+    props: {
+      serverData: PersistentStorage.ssr(),
+    },
+  };
+};
 ```
 
 ## API
 
 - [PersistentStorage](#persistentstorage)
-  - [set](#persistentstorage.set)
+  - [set](#persistentstorageset)
   - [setStringified](#persistentstoragesetstringified)
   - [get](#persistentstorageget)
   - [getStringified](#persistentstoragegetstringified)
+  - [ssr](#persistentstoragessr)
 - [SafeStorage](#safestorage)
   - [fakeStorage](#fakestorage)
   - [safeLocalStorage](#safelocalstorage)
   - [safeSessionStorage](#safesessionstorage)
 - [usePersistentState](#usepersistentstate)
+- [PersistStorageHydrationProvider](#persiststoragehydrationprovider)
 
 > Note: the types in API section are simplified for better understanding
 
@@ -148,6 +166,23 @@ Retrieves the string representation of the value associated with the specified `
 
 ---
 
+### PersistentStorage.ssr
+
+```ts
+ssr(
+  overrideValues?: Partial<Record<string, any>>,
+  overrideStringifiedValues?: Partial<Record<string, string>>
+): PersistStorageHydrationContext;
+```
+
+Overrides the current values in the persistent storage with the provided values and stringifiedValues.
+It updates both regular values and their corresponding stringified representations in the storage.
+
+Retrieves the server-side rendered data for the configured fields in the [PersistentStorage](#persistentstorage).
+This data should be passed to the [PersistStorageHydrationProvider](#persiststoragehydrationprovider) to hydrate the client-side state.
+
+For better understanding of usage see [example](#example)
+
 ### SafeStorage
 
 The `SafeStorage` interface represents a safe storage mechanism that can be used for storing data persistently.
@@ -205,6 +240,18 @@ Whenever the state value is updated using the `setValue` function, it automatica
 This hook simplifies the process of creating persistent state variables, eliminating the need for manual storage management. It provides a seamless integration between the state management and storage mechanism, enabling you to easily create persistent components or store important data in a persistent manner.
 
 ---
+
+### PersistStorageHydrationProvider
+
+```ts
+type PersistStorageHydrationContext = Record<string, string | undefined>;
+
+const PersistStorageHydrationProvider: Provider<PersistStorageHydrationContext>;
+```
+
+Component used to hydrate the client-side state with server-side rendered data
+
+Simply wrap your root component or specific components with this provider, passing the server-side data obtained from [PersistentStorage.ssr()](#persistentstoragessr) as the `value` prop.
 
 ## License
 
