@@ -1,7 +1,7 @@
 import { build } from "tsup";
 import ts from "typescript";
 import fs from "fs/promises";
-import { FILES_TO_COPY, Folder } from "./constants.mjs";
+import { FILES_TO_COPY } from "./constants.mjs";
 import {
   addNestedPackagesJson,
   getMainPackageJson,
@@ -10,21 +10,6 @@ import {
 
 const run = async (outDir: string) => {
   await fs.rm(outDir, { recursive: true, force: true });
-
-  await build({
-    outDir,
-    minify: false,
-    entry: ["src/index.ts", `src/*/*.ts`],
-    splitting: true,
-    sourcemap: true,
-    clean: false,
-    target: "es2020",
-    treeshake: { preset: "smallest" },
-    dts: false,
-    format: ["cjs", "esm"],
-    platform: "browser",
-    external: ["react"],
-  });
 
   if (
     ts
@@ -40,25 +25,32 @@ const run = async (outDir: string) => {
     throw new Error("TypeScript compilation failed");
   }
 
-  await addNestedPackagesJson(outDir);
-
   const children = await fs.readdir(outDir);
-
-  const chunksDir = `${outDir}/${Folder.CHUNKS}`;
-
-  await fs.mkdir(chunksDir);
 
   for (let i = 0; i < children.length; i++) {
     const file = children[i];
 
     const path = `${outDir}/${file}`;
 
-    if (file.startsWith("chunk-")) {
-      await fs.rename(path, `${chunksDir}/${file}`);
-    } else {
-      await handleChild(path);
-    }
+    await handleChild(path);
   }
+
+  await addNestedPackagesJson(outDir);
+
+  await build({
+    outDir,
+    minify: false,
+    entry: ["src/index.ts", `src/*/*.ts`],
+    splitting: true,
+    sourcemap: true,
+    clean: false,
+    target: "es2020",
+    treeshake: { preset: "smallest" },
+    dts: false,
+    format: ["cjs", "esm"],
+    platform: "browser",
+    external: ["react"],
+  });
 
   await fs.writeFile(`${outDir}/package.json`, await getMainPackageJson());
 
