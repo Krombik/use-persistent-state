@@ -124,14 +124,9 @@ declare class PersistentStorage {
    * };
    * ```
    */
-  static ssr<
-    T1 extends keyof Omit<Fields, T2>,
-    T2 extends keyof Omit<StringifiedFields, T1>
-  >(
-    values?: [T1] extends [never]
-      ? Partial<Fields>
-      : { [key in T1]?: Fields[key] },
-    stringifiedValues?: { [key in T2]?: StringifiedFields[key] }
+  static ssr(
+    values?: Partial<Fields>,
+    stringifiedValues?: Partial<StringifiedFields>
   ): PersistStorageHydrationContext;
 }
 
@@ -150,6 +145,10 @@ export type PersistentStorageConfig = {
      * The storage mechanism to be used for persisting the data.
      */
     storage: SafeStorage;
+    /**
+     * Check is current storage value is valid, if not use `defaultValue` instead
+     */
+    isValid?(value: Exclude<Fields[key], undefined>): boolean;
   } & (undefined extends Extract<Fields[key], undefined>
     ? {
         defaultValue?: Fields[key];
@@ -175,20 +174,20 @@ type UsePersistentState = {
    * @param key - The key to retrieve the persistent state for.
    * @returns The persistent state tuple for the specified key.
    */
-  <T extends keyof Fields & string>(key: T): Readonly<
-    PersistentStateTuple<Fields[T]>
-  >;
+  <T extends keyof Fields & string>(
+    key: T
+  ): Readonly<PersistentStateTuple<Fields[T]>>;
 };
 
 type StoreItem = [
   persistStateTuple: PersistentStateTuple<any>,
   register: () => void,
-  setStringifiedValue: (value: string | undefined) => void
+  setStringifiedValue: (value: string | undefined) => void,
 ];
 
 const [_PersistentStorage, usePersistentState] = ((): [
   PersistentStorage,
-  UsePersistentState
+  UsePersistentState,
 ] => {
   const store = new Map<string, StoreItem>();
 
@@ -200,7 +199,7 @@ const [_PersistentStorage, usePersistentState] = ((): [
     for (const key in config) {
       const forceRerenderSet = new Set<(value: {}) => void>();
 
-      const { converter = JSON, storage, defaultValue } = config[key];
+      const { converter = JSON, storage, defaultValue, isValid } = config[key];
 
       const storageItem = storage.getItem(key);
 
@@ -214,6 +213,10 @@ const [_PersistentStorage, usePersistentState] = ((): [
         }
 
         initialValue = converter.parse(storageItem);
+
+        if (isValid && !isValid(initialValue)) {
+          throw null;
+        }
 
         initialStringifiedValue = storageItem;
       } catch (e) {

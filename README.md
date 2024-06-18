@@ -16,6 +16,12 @@ or yarn:
 yarn add use-persistent-state
 ```
 
+or pnpm:
+
+```
+pnpm add use-persistent-state
+```
+
 ---
 
 ## Example
@@ -116,6 +122,7 @@ const PersistentStorage: (config: {
       stringify(value: any): string;
       parse(value: string): any;
     };
+    isValid?(value: any): boolean;
   };
 }) => void;
 ```
